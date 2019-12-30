@@ -8,6 +8,7 @@ repository = "https://github.com/kettle11/devserver"
 readme = "README.md"
 keywords = ["web", "server", "https", "http"]
 categories = ["web-programming::websocket"]
+description = "A zero configuration tool for hosting a local folder with https for development purposes."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

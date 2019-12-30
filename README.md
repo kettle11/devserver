@@ -1,4 +1,4 @@
-#devserver
+# devserver
 An extremely tiny tool to serve a static folder on https://localhost:8000 with a hardcoded self-signed certificate.
 
 This tool is not an example of elegance, security, functionality, or good Rust code.

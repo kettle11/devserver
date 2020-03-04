@@ -1,7 +1,7 @@
 # devserver_lib
 This tiny Rust library does (nearly) the minimum necessary to serve a static folder over https://localhost:8000.
 
-This is not an example of elegance, security, functionality, or good Rust code. But it is simple. And it does serve a folder over https in under 100 lines of actual logic with only the standard library and one small external dependency.
+This is not an example of elegance, security, functionality, or good Rust code. But it is simple. And it does serve a folder over https (or http) in under 100 lines of actual logic with only the standard library and one small external dependency.
 
 This may be useful as an example, or adapted for cases requiring an extremely simple development server.
 
@@ -11,7 +11,7 @@ extern crate devserver_lib;
 
 fn main() 
 {
-  devserver_lib::run(); // Runs forever serving the current folder on https://localhost:8000
+  devserver_lib::run("localhost:8000", false); // Runs forever serving the current folder on http://localhost:8000
 }
 ```
 

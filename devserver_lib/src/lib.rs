@@ -22,8 +22,12 @@ fn handle_client<T: Read + Write>(mut stream: T) {
 
     let request_string = str::from_utf8(&buffer).unwrap();
 
+    if request_string.len() == 0 {
+        return;
+    }
     // Split the request into different parts.
     let mut parts = request_string.split(' ');
+
     let _method = parts.next().unwrap().trim();
     let path = parts.next().unwrap().trim();
     let _http_version = parts.next().unwrap().trim();
@@ -67,7 +71,7 @@ fn handle_client<T: Read + Write>(mut stream: T) {
     }
 }
 
-pub fn run(address: &str, https: bool) {
+pub fn run(address: &str) {
     // Hard coded certificate generated with the following commands:
     // openssl req -x509 -newkey rsa:1024 -keyout key.pem -out cert.pem -days 36500 -nodes -subj "/"
     // openssl pkcs12 -export -out identity.pfx -inkey key.pem -in cert.pem
@@ -82,18 +86,25 @@ pub fn run(address: &str, https: bool) {
 
     for stream in listener.incoming() {
         if let Ok(mut stream) = stream {
-            if https {
-                let acceptor = acceptor.clone();
-                thread::spawn(move || {
-                    if let Ok(stream) = acceptor.accept(stream).as_mut() {
+            let acceptor = acceptor.clone();
+            thread::spawn(move || {
+                let mut buf = [0; 2];
+                stream.peek(&mut buf).expect("peek failed");
+
+                // HTTP requests always begin with a verb like 'GET'.
+                // HTTPS requests begin with a number, so peeking and checking for a number
+                // is used to determine if a request is HTTPS or HTTP
+                let is_https =
+                    !((buf[0] as char).is_alphabetic() && (buf[1] as char).is_alphabetic());
+                if is_https {
+                    // acceptor.accept will block indefinitely if called with an HTTP stream.
+                    if let Ok(stream) = acceptor.accept(stream) {
                         handle_client(stream);
                     }
-                });
-            } else {
-                thread::spawn(move || {
+                } else {
                     handle_client(&mut stream);
-                });
-            }
+                }
+            });
         }
     }
 }

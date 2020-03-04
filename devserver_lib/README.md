@@ -11,7 +11,7 @@ extern crate devserver_lib;
 
 fn main() 
 {
-  devserver_lib::run("localhost:8000", false); // Runs forever serving the current folder on http://localhost:8000
+  devserver_lib::run("localhost:8000"); // Runs forever serving the current folder on http://localhost:8000
 }
 ```
 

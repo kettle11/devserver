@@ -1,25 +1,29 @@
 /// A local host only for serving static files.
 /// Simple and easy, but not robust or tested.
 extern crate native_tls;
-use native_tls::{Identity, TlsAcceptor, TlsStream};
+use native_tls::{Identity, TlsAcceptor};
 
 use std::ffi::OsStr;
 use std::fs;
+use std::io::BufRead;
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::path::Path;
 use std::str;
 use std::sync::Arc;
 use std::thread;
 
-fn handle_client(mut stream: TlsStream<TcpStream>) {
-    let mut buffer = [0; 512];
-    stream.read(&mut buffer).unwrap();
+fn handle_client<T: Read + Write>(mut stream: T) {
+    let mut buffer = Vec::new();
+
+    std::io::BufReader::new(&mut stream)
+        .read_until(b'\r', &mut buffer)
+        .unwrap();
 
     let request_string = str::from_utf8(&buffer).unwrap();
 
     // Split the request into different parts.
-    let mut parts = request_string.split(" ");
+    let mut parts = request_string.split(' ');
     let _method = parts.next().unwrap().trim();
     let path = parts.next().unwrap().trim();
     let _http_version = parts.next().unwrap().trim();
@@ -54,23 +58,16 @@ fn handle_client(mut stream: TlsStream<TcpStream>) {
         let mut bytes = response.as_bytes().to_vec();
         bytes.append(&mut file_contents);
 
-        // Bytes cannot be written to stream all at once, so keep writing until complete.
-        let bytes_len = bytes.len();
-        let mut current_byte = 0;
-        while current_byte < bytes_len {
-            let bytes_written = stream.write(&bytes[current_byte..bytes_len]).unwrap();
-            current_byte += bytes_written;
-        }
+        stream.write_all(&bytes).unwrap();
         stream.flush().unwrap();
     } else {
         println!("Could not find file: {}", &path);
         let response = "HTTP/1.1 404 NOT FOUND\r\n\r\n";
-        let bytes = response.as_bytes().to_vec();
-        stream.write(&bytes).unwrap();
+        stream.write_all(response.as_bytes()).unwrap();
     }
 }
 
-pub fn run() {
+pub fn run(address: &str, https: bool) {
     // Hard coded certificate generated with the following commands:
     // openssl req -x509 -newkey rsa:1024 -keyout key.pem -out cert.pem -days 36500 -nodes -subj "/"
     // openssl pkcs12 -export -out identity.pfx -inkey key.pem -in cert.pem
@@ -81,18 +78,22 @@ pub fn run() {
     let acceptor = TlsAcceptor::new(identity).unwrap();
     let acceptor = Arc::new(acceptor);
 
-    let listener = TcpListener::bind("localhost:8000").unwrap();
+    let listener = TcpListener::bind(address).unwrap();
 
     for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
+        if let Ok(mut stream) = stream {
+            if https {
                 let acceptor = acceptor.clone();
                 thread::spawn(move || {
-                    let stream = acceptor.accept(stream).unwrap();
-                    handle_client(stream);
+                    if let Ok(stream) = acceptor.accept(stream).as_mut() {
+                        handle_client(stream);
+                    }
+                });
+            } else {
+                thread::spawn(move || {
+                    handle_client(&mut stream);
                 });
             }
-            Err(_) => { /* Just ignore the error */ }
         }
     }
 }

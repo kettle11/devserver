@@ -51,7 +51,7 @@ checksum = "e7ca8a5221364ef15ce201e8ed2f609fc312682a8f4e0e3d4aa5879764e0fa3b"
 
 [[package]]
 name = "devserver_lib"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "native-tls",
 ]

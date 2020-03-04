@@ -1,6 +1,14 @@
 /// A local host only for serving static files.
 /// Simple and easy, but not robust or tested.
 extern crate native_tls;
+
+#[cfg(feature = "reload")]
+extern crate notify;
+#[cfg(feature = "reload")]
+use sha1::{Digest, Sha1};
+#[cfg(feature = "reload")]
+extern crate base64;
+
 use native_tls::{Identity, TlsAcceptor};
 
 use std::ffi::OsStr;
@@ -13,15 +21,69 @@ use std::str;
 use std::sync::Arc;
 use std::thread;
 
-fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
+fn read_header<T: Read + Write>(stream: &mut T) -> Vec<u8> {
     let mut buffer = Vec::new();
+    let mut reader = std::io::BufReader::new(stream);
+    loop {
+        reader.read_until(b'\n', &mut buffer).unwrap();
+        // Read until end of header.
+        if &buffer[buffer.len() - 4..] == "\r\n\r\n".as_bytes() {
+            break;
+        }
+    }
+    buffer
+}
 
-    std::io::BufReader::new(&mut stream)
-        .read_until(b'\r', &mut buffer)
-        .unwrap();
+fn parse_websocket_handshake(bytes: &[u8]) -> String {
+    let request_string = str::from_utf8(&bytes).unwrap();
+    let lines = request_string.split("\r\n");
+    let mut sec_websocket_key = "";
 
+    for line in lines {
+        let parts: Vec<&str> = line.split(':').collect();
+        match parts[0] {
+            "Sec-WebSocket-Key" => {
+                sec_websocket_key = parts[1].trim();
+            }
+            _ => {}
+        }
+    }
+
+    // Perform a ceremony of getting the SHA1 hash of the sec_websocket_key joined with
+    // an arbitrary string and then take the base 64 encoding of that.
+    let sec_websocket_accept = format!(
+        "{}{}",
+        sec_websocket_key, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+    );
+    let mut hasher = Sha1::new();
+    hasher.input(sec_websocket_accept.as_bytes());
+    let result = hasher.result();
+    let bytes = base64::encode(&result);
+
+    format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",bytes)
+}
+
+fn send_websocket_message<T: Write>(mut stream: T, message: &str) {
+    /*
+    let first_byte = 1 << 0 | // FIN (must be 1)
+        0 << 1 | // RSV1 (must be 0 unless there's an extension)
+        2 << 2 | // RSV2 (must be 0 unless there's an extension)
+        3 << 3 | // RSV2 (must be 0 unless there's an extension)
+        */
+}
+
+fn handle_websocket_handshake<T: Read + Write>(mut stream: T) {
+    let header = read_header(&mut stream);
+    let response = parse_websocket_handshake(&header);
+    stream.write_all(response.as_bytes()).unwrap();
+    stream.flush().unwrap();
+}
+
+fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
+    let buffer = read_header(&mut stream);
     let request_string = str::from_utf8(&buffer).unwrap();
 
+    println!("REQUEST: {:?}", request_string);
     if request_string.len() == 0 {
         return;
     }
@@ -69,10 +131,11 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
         println!("Could not find file: {}", path.to_str().unwrap());
         let response = "HTTP/1.1 404 NOT FOUND\r\n\r\n";
         stream.write_all(response.as_bytes()).unwrap();
+        stream.flush().unwrap();
     }
 }
 
-pub fn run(address: &str, path: &str) {
+pub fn run(address: &str, port: u32, path: &str) {
     // Hard coded certificate generated with the following commands:
     // openssl req -x509 -newkey rsa:1024 -keyout key.pem -out cert.pem -days 36500 -nodes -subj "/"
     // openssl pkcs12 -export -out identity.pfx -inkey key.pem -in cert.pem
@@ -83,14 +146,54 @@ pub fn run(address: &str, path: &str) {
     let acceptor = TlsAcceptor::new(identity).unwrap();
     let acceptor = Arc::new(acceptor);
 
-    let listener = TcpListener::bind(address).unwrap();
     let path = Arc::new(path.to_owned());
 
+    let reload = true;
+    if reload {
+        let address = address.to_owned();
+        //let path = path.clone();
+
+        thread::spawn(move || {
+            // Setup websocket receiver.
+            let websocket_address = format!("{}:{:?}", address, 8129 /* Arbitrary port */);
+            let listener = TcpListener::bind(websocket_address).unwrap();
+            for stream in listener.incoming() {
+                if let Ok(stream) = stream {
+                    println!("INCOMING WEBSOCKET");
+                    handle_websocket_handshake(stream);
+                }
+            }
+        });
+        /*
+        let path = path.clone();
+        thread::spawn(move || {
+            let (tx, rx) = channel();
+            use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+            let mut watcher: RecommendedWatcher =
+                Watcher::new(tx, std::time::Duration::from_secs(2)).unwrap();
+            println!("PATH: {}", path);
+            watcher
+                .watch(Path::new(path.as_ref()), RecursiveMode::Recursive)
+                .unwrap();
+            match rx.recv() {
+                Ok(event) => println!("{:?}", event),
+                Err(e) => println!("watch error: {:?}", e),
+            };
+        });
+        */
+    }
+
+    let address = format!("{}:{:?}", address, port);
+    println!("Address: {}", address);
+    let listener = TcpListener::bind(address).unwrap();
     for stream in listener.incoming() {
-        if let Ok(mut stream) = stream {
+        if let Ok(stream) = stream {
+            println!("INCOMING CONNECTION1");
+
             let acceptor = acceptor.clone();
             let path = path.clone();
             thread::spawn(move || {
+                println!("INCOMING CONNECTION");
                 let mut buf = [0; 2];
                 stream.peek(&mut buf).expect("peek failed");
 
@@ -99,13 +202,15 @@ pub fn run(address: &str, path: &str) {
                 // is used to determine if a request is HTTPS or HTTP
                 let is_https =
                     !((buf[0] as char).is_alphabetic() && (buf[1] as char).is_alphabetic());
+
+                println!("HTTPS: {:?}", is_https);
                 if is_https {
                     // acceptor.accept will block indefinitely if called with an HTTP stream.
                     if let Ok(stream) = acceptor.accept(stream) {
                         handle_client(stream, &path);
                     }
                 } else {
-                    handle_client(&mut stream, &path);
+                    handle_client(stream, &path);
                 }
             });
         }

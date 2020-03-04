@@ -49,5 +49,12 @@ devserver --address 127.0.0.1:8080 --path "some_directory/subdirectory"
         address,
         address
     );
-    devserver_lib::run(&address, &path);
+
+    let parts: Vec<&str> = address.split(':').collect();
+    let port = if let Some(port) = parts.get(1) {
+        port.parse().expect("Port must be a number")
+    } else {
+        8000
+    };
+    devserver_lib::run(&parts[0], port, &hosted_path.to_string_lossy());
 }

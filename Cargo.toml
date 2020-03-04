@@ -1,6 +1,6 @@
 [package]
 name = "devserver"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Ian Kettlewell <ian.kettlewell@gmail.com>"]
 edition = "2018"
 license = "MIT"
@@ -8,7 +8,7 @@ repository = "https://github.com/kettle11/devserver"
 readme = "README.md"
 keywords = ["web", "server", "https", "http"]
 categories = ["command-line-utilities", "development-tools", "web-programming::http-server"]
-description = "A zero configuration local https server for hosting a static folder. ONLY for development!"
+description = "A simple server for locally hosting a folder."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

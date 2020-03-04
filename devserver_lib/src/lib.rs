@@ -13,7 +13,7 @@ use std::str;
 use std::sync::Arc;
 use std::thread;
 
-fn handle_client<T: Read + Write>(mut stream: T) {
+fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
     let mut buffer = Vec::new();
 
     std::io::BufReader::new(&mut stream)
@@ -38,11 +38,12 @@ fn handle_client<T: Read + Write>(mut stream: T) {
         path.trim_matches('/') // Trim off '/'
     };
 
-    let extension = Path::new(path).extension().and_then(OsStr::to_str);
+    let path = Path::new(root_path).join(Path::new(path));
+    let extension = path.extension().and_then(OsStr::to_str);
 
     // If no extension is specified assume html
     let path = if extension == None {
-        format!("{}{}", path, ".html")
+        path.with_extension("html")
     } else {
         path.to_owned()
     };
@@ -65,13 +66,13 @@ fn handle_client<T: Read + Write>(mut stream: T) {
         stream.write_all(&bytes).unwrap();
         stream.flush().unwrap();
     } else {
-        println!("Could not find file: {}", &path);
+        println!("Could not find file: {}", path.to_str().unwrap());
         let response = "HTTP/1.1 404 NOT FOUND\r\n\r\n";
         stream.write_all(response.as_bytes()).unwrap();
     }
 }
 
-pub fn run(address: &str) {
+pub fn run(address: &str, path: &str) {
     // Hard coded certificate generated with the following commands:
     // openssl req -x509 -newkey rsa:1024 -keyout key.pem -out cert.pem -days 36500 -nodes -subj "/"
     // openssl pkcs12 -export -out identity.pfx -inkey key.pem -in cert.pem
@@ -83,10 +84,12 @@ pub fn run(address: &str) {
     let acceptor = Arc::new(acceptor);
 
     let listener = TcpListener::bind(address).unwrap();
+    let path = Arc::new(path.to_owned());
 
     for stream in listener.incoming() {
         if let Ok(mut stream) = stream {
             let acceptor = acceptor.clone();
+            let path = path.clone();
             thread::spawn(move || {
                 let mut buf = [0; 2];
                 stream.peek(&mut buf).expect("peek failed");
@@ -99,10 +102,10 @@ pub fn run(address: &str) {
                 if is_https {
                     // acceptor.accept will block indefinitely if called with an HTTP stream.
                     if let Ok(stream) = acceptor.accept(stream) {
-                        handle_client(stream);
+                        handle_client(stream, &path);
                     }
                 } else {
-                    handle_client(&mut stream);
+                    handle_client(&mut stream, &path);
                 }
             });
         }

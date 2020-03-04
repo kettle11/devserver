@@ -13,4 +13,4 @@ description = "A zero configuration local https server for hosting a static fold
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-devserver_lib = { path = "devserver_lib", version = "0.1.0" }
+devserver_lib = { path = "devserver_lib", version = "0.1.1" }

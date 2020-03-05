@@ -2,13 +2,6 @@
 /// Simple and easy, but not robust or tested.
 extern crate native_tls;
 
-#[cfg(feature = "reload")]
-extern crate notify;
-#[cfg(feature = "reload")]
-use sha1::{Digest, Sha1};
-#[cfg(feature = "reload")]
-extern crate base64;
-
 use native_tls::{Identity, TlsAcceptor};
 
 use std::ffi::OsStr;
@@ -21,87 +14,27 @@ use std::str;
 use std::sync::Arc;
 use std::thread;
 
-const RELOAD_PORT: u32 = 8129; /* Arbitrary port */
+#[cfg(feature = "reload")]
+mod reload;
 
-fn read_header<T: Read + Write>(stream: &mut T) -> Vec<u8> {
+pub fn read_header<T: Read + Write>(stream: &mut T) -> Vec<u8> {
     let mut buffer = Vec::new();
     let mut reader = std::io::BufReader::new(stream);
     loop {
         reader.read_until(b'\n', &mut buffer).unwrap();
         // Read until end of header.
-        if &buffer[buffer.len() - 4..] == "\r\n\r\n".as_bytes() {
+        if &buffer[buffer.len() - 4..] == b"\r\n\r\n" {
             break;
         }
     }
     buffer
 }
 
-fn parse_websocket_handshake(bytes: &[u8]) -> String {
-    let request_string = str::from_utf8(&bytes).unwrap();
-    let lines = request_string.split("\r\n");
-    let mut sec_websocket_key = "";
-
-    for line in lines {
-        let parts: Vec<&str> = line.split(':').collect();
-        match parts[0] {
-            "Sec-WebSocket-Key" => {
-                sec_websocket_key = parts[1].trim();
-            }
-            _ => {}
-        }
-    }
-
-    // Perform a ceremony of getting the SHA1 hash of the sec_websocket_key joined with
-    // an arbitrary string and then take the base 64 encoding of that.
-    let sec_websocket_accept = format!(
-        "{}{}",
-        sec_websocket_key, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-    );
-    let mut hasher = Sha1::new();
-    hasher.input(sec_websocket_accept.as_bytes());
-    let result = hasher.result();
-    let bytes = base64::encode(&result);
-
-    format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",bytes)
-}
-
-fn send_websocket_message<T: Write>(mut stream: T, message: &str) -> Result<(), std::io::Error> {
-    let message_bytes = message.as_bytes();
-    let payload_length = message_bytes.len();
-
-    stream.write(&[129])?; // We're always responding with text. The combination of bitflags and opcode produces '129'
-    let mut second_byte: u8 = 0 << 0; // Don't mask the first bit.
-    if payload_length < 125 {
-        // second_byte |= 0 << 7;
-        second_byte |= payload_length as u8;
-        stream.write(&[second_byte])?;
-    } else if payload_length < std::u16::MAX as usize {
-        stream.write(&((126 + payload_length) as u16).to_be_bytes())?; // Write the length as a u16
-    } else if payload_length < std::u64::MAX as usize {
-        stream.write(&((127 + payload_length) as u16).to_be_bytes())?; // Write the length as a u64
-    } else {
-        println!("Message too large");
-    }
-
-    // There could be a masking key here, but the server does not mask.
-
-    // Since we're sending text is it wrong to send bytes here?
-    stream.write(&message_bytes)?;
-    Ok(())
-}
-
-fn handle_websocket_handshake<T: Read + Write>(mut stream: T) {
-    let header = read_header(&mut stream);
-    let response = parse_websocket_handshake(&header);
-    stream.write_all(response.as_bytes()).unwrap();
-    stream.flush().unwrap();
-}
-
 fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
     let buffer = read_header(&mut stream);
     let request_string = str::from_utf8(&buffer).unwrap();
 
-    if request_string.len() == 0 {
+    if request_string.is_empty() {
         return;
     }
     // Split the request into different parts.
@@ -135,8 +68,9 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
         let content_type = extension_to_mime_impl(Some(extension));
         let mut content_length = file_contents.len();
 
+        // Prepare to inject code into HTML if reload is enabled.
         #[cfg(feature = "reload")]
-        let reload_append = include_str!("reload.html").as_bytes();
+        let reload_append = include_bytes!("reload.html");
         #[cfg(feature = "reload")]
         {
             if extension == "html" {
@@ -148,11 +82,13 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
             "HTTP/1.1 200 OK\r\nContent-type: {}\r\nContent-Length: {}\r\n\r\n",
             content_type, content_length
         );
+
         let mut bytes = response.as_bytes().to_vec();
         bytes.append(&mut file_contents);
 
         stream.write_all(&bytes).unwrap();
 
+        // Inject code into HTML if reload is enabled
         #[cfg(feature = "reload")]
         {
             if extension == "html" {
@@ -160,6 +96,7 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
                 stream.write_all(reload_append).unwrap();
             }
         }
+
         stream.flush().unwrap();
     } else {
         println!("Could not find file: {}", path.to_str().unwrap());
@@ -169,7 +106,7 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
     }
 }
 
-pub fn run(address: &str, port: u32, path: &str) {
+pub fn run(address: &str, port: u32, path: &str, reload: bool) {
     // Hard coded certificate generated with the following commands:
     // openssl req -x509 -newkey rsa:1024 -keyout key.pem -out cert.pem -days 36500 -nodes -subj "/"
     // openssl pkcs12 -export -out identity.pfx -inkey key.pem -in cert.pem
@@ -180,85 +117,30 @@ pub fn run(address: &str, port: u32, path: &str) {
     let acceptor = TlsAcceptor::new(identity).unwrap();
     let acceptor = Arc::new(acceptor);
 
-    let path = Arc::new(path.to_owned());
-
-    let reload = true;
-    if reload {
-        let address = address.to_owned();
-        let path = path.clone();
-
-        thread::spawn(move || {
-            // Setup websocket receiver.
-            let websocket_address = format!("{}:{:?}", address, RELOAD_PORT);
-            let listener = TcpListener::bind(websocket_address).unwrap();
-
-            for stream in listener.incoming() {
-                let path = path.clone();
-
-                thread::spawn(move || {
-                    if let Ok(mut stream) = stream {
-                        handle_websocket_handshake(&mut stream);
-
-                        // We do not handle ping/pong requests. Is that bad?
-                        // This code also assumes the client will never send any messages
-                        // other than the initial handshake.
-                        let (tx, rx) = std::sync::mpsc::channel();
-                        use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
-                        let mut watcher: RecommendedWatcher =
-                            Watcher::new(tx, std::time::Duration::from_millis(100)).unwrap();
-                        watcher
-                            .watch(Path::new(path.as_ref()), RecursiveMode::Recursive)
-                            .unwrap();
-                        loop {
-                            match rx.recv() {
-                                Ok(event) => {
-                                    let (_path, refresh) = match event {
-                                        DebouncedEvent::NoticeWrite(path) => (path, false),
-                                        DebouncedEvent::NoticeRemove(path) => (path, false),
-                                        DebouncedEvent::Create(path) => (path, true),
-                                        DebouncedEvent::Write(path) => (path, true),
-                                        DebouncedEvent::Chmod(path) => (path, true),
-                                        DebouncedEvent::Remove(path) => (path, true),
-                                        DebouncedEvent::Rename(old_path, _new_path) => {
-                                            (old_path, false)
-                                        }
-                                        DebouncedEvent::Rescan => {
-                                            (std::path::PathBuf::new(), false)
-                                        }
-                                        DebouncedEvent::Error(..) => panic!(),
-                                    };
-
-                                    if refresh {
-                                        // A blank message is sent triggering a refresh on any file change.
-                                        // In the future a path coudl be sent here.
-                                        if send_websocket_message(&stream, "").is_err() {
-                                            break;
-                                        };
-                                    }
-                                }
-                                Err(e) => println!("File watch error: {:?}", e),
-                            };
-                        }
-                    }
-                });
-            }
-        });
+    #[cfg(feature = "reload")]
+    {
+        if reload {
+            let address = address.to_owned();
+            let path = path.to_owned();
+            thread::spawn(move || {
+                reload::watch_for_reloads(&address, &path);
+            });
+        }
     }
 
-    let address = format!("{}:{:?}", address, port);
-    println!("Address: {}", address);
-    let listener = TcpListener::bind(address).unwrap();
+    let address_with_port = format!("{}:{:?}", address, port);
+    let listener = TcpListener::bind(address_with_port).unwrap();
     for stream in listener.incoming() {
         if let Ok(stream) = stream {
             let acceptor = acceptor.clone();
-            let path = path.clone();
+            let path = path.to_owned();
             thread::spawn(move || {
-                let mut buf = [0; 2];
-                stream.peek(&mut buf).expect("peek failed");
-
                 // HTTP requests always begin with a verb like 'GET'.
                 // HTTPS requests begin with a number, so peeking and checking for a number
                 // is used to determine if a request is HTTPS or HTTP
+                let mut buf = [0; 2];
+                stream.peek(&mut buf).expect("peek failed");
+
                 let is_https =
                     !((buf[0] as char).is_alphabetic() && (buf[1] as char).is_alphabetic());
 

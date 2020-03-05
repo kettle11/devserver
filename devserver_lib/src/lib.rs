@@ -65,27 +65,20 @@ fn parse_websocket_handshake(bytes: &[u8]) -> String {
     format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",bytes)
 }
 
-fn send_websocket_message<T: Write>(mut stream: T, message: &str) {
+fn send_websocket_message<T: Write>(mut stream: T, message: &str) -> Result<(), std::io::Error> {
     let message_bytes = message.as_bytes();
     let payload_length = message_bytes.len();
 
-    stream.write(&[129]).unwrap(); // We're always responding with text. The combination of bitflags and opcode produces '129'
+    stream.write(&[129])?; // We're always responding with text. The combination of bitflags and opcode produces '129'
     let mut second_byte: u8 = 0 << 0; // Don't mask the first bit.
     if payload_length < 125 {
         // second_byte |= 0 << 7;
-        second_byte |= (payload_length as u8) << 0;
-
-        stream.write(&[second_byte]).unwrap();
+        second_byte |= payload_length as u8;
+        stream.write(&[second_byte])?;
     } else if payload_length < std::u16::MAX as usize {
-        stream
-            .write(&((126 + payload_length) as u16).to_be_bytes())
-            .unwrap(); // Write the length as a u16
+        stream.write(&((126 + payload_length) as u16).to_be_bytes())?; // Write the length as a u16
     } else if payload_length < std::u64::MAX as usize {
-        second_byte |= 127 << 1;
-        stream.write(&[second_byte]).unwrap();
-        stream
-            .write(&((127 + payload_length) as u16).to_be_bytes())
-            .unwrap(); // Write the length as a u64
+        stream.write(&((127 + payload_length) as u16).to_be_bytes())?; // Write the length as a u64
     } else {
         println!("Message too large");
     }
@@ -93,7 +86,8 @@ fn send_websocket_message<T: Write>(mut stream: T, message: &str) {
     // There could be a masking key here, but the server does not mask.
 
     // Since we're sending text is it wrong to send bytes here?
-    stream.write(&message_bytes).unwrap(); // Should this data be bigendian?
+    stream.write(&message_bytes)?;
+    Ok(())
 }
 
 fn handle_websocket_handshake<T: Read + Write>(mut stream: T) {
@@ -216,7 +210,7 @@ pub fn run(address: &str, port: u32, path: &str) {
                         loop {
                             match rx.recv() {
                                 Ok(event) => {
-                                    let (path, refresh) = match event {
+                                    let (_path, refresh) = match event {
                                         DebouncedEvent::NoticeWrite(path) => (path, false),
                                         DebouncedEvent::NoticeRemove(path) => (path, false),
                                         DebouncedEvent::Create(path) => (path, true),
@@ -233,8 +227,11 @@ pub fn run(address: &str, port: u32, path: &str) {
                                     };
 
                                     if refresh {
-                                        // Need to get relative path here.
-                                        send_websocket_message(&stream, path.to_str().unwrap());
+                                        // A blank message is sent triggering a refresh on any file change.
+                                        // In the future a path coudl be sent here.
+                                        if send_websocket_message(&stream, "").is_err() {
+                                            break;
+                                        };
                                     }
                                 }
                                 Err(e) => println!("File watch error: {:?}", e),

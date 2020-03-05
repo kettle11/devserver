@@ -64,12 +64,34 @@ fn parse_websocket_handshake(bytes: &[u8]) -> String {
 }
 
 fn send_websocket_message<T: Write>(mut stream: T, message: &str) {
-    /*
-    let first_byte = 1 << 0 | // FIN (must be 1)
-        0 << 1 | // RSV1 (must be 0 unless there's an extension)
-        2 << 2 | // RSV2 (must be 0 unless there's an extension)
-        3 << 3 | // RSV2 (must be 0 unless there's an extension)
-        */
+    let message_bytes = message.as_bytes();
+    let payload_length = message_bytes.len();
+
+    stream.write(&[129]).unwrap(); // We're always responding with text. The combination of bitflags and opcode produces '129'
+    let mut second_byte: u8 = 0 << 0; // Don't mask the first bit.
+    if payload_length < 125 {
+        // second_byte |= 0 << 7;
+        second_byte |= (payload_length as u8) << 0;
+
+        stream.write(&[second_byte]).unwrap();
+    } else if payload_length < std::u16::MAX as usize {
+        stream
+            .write(&((126 + payload_length) as u16).to_be_bytes())
+            .unwrap(); // Write the length as a u16
+    } else if payload_length < std::u64::MAX as usize {
+        second_byte |= 127 << 1;
+        stream.write(&[second_byte]).unwrap();
+        stream
+            .write(&((127 + payload_length) as u16).to_be_bytes())
+            .unwrap(); // Write the length as a u64
+    } else {
+        println!("Message too large");
+    }
+
+    // There could be a masking key here, but the server does not mask.
+
+    // Since we're sending text is it wrong to send bytes here?
+    stream.write(&message_bytes).unwrap(); // Should this data be bigendian?
 }
 
 fn handle_websocket_handshake<T: Read + Write>(mut stream: T) {
@@ -83,7 +105,7 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
     let buffer = read_header(&mut stream);
     let request_string = str::from_utf8(&buffer).unwrap();
 
-    println!("REQUEST: {:?}", request_string);
+    // println!("REQUEST: {:?}", request_string);
     if request_string.len() == 0 {
         return;
     }
@@ -158,9 +180,9 @@ pub fn run(address: &str, port: u32, path: &str) {
             let websocket_address = format!("{}:{:?}", address, 8129 /* Arbitrary port */);
             let listener = TcpListener::bind(websocket_address).unwrap();
             for stream in listener.incoming() {
-                if let Ok(stream) = stream {
-                    println!("INCOMING WEBSOCKET");
-                    handle_websocket_handshake(stream);
+                if let Ok(mut stream) = stream {
+                    handle_websocket_handshake(&mut stream);
+                    send_websocket_message(&mut stream, "Hello world!");
                 }
             }
         });
@@ -188,12 +210,9 @@ pub fn run(address: &str, port: u32, path: &str) {
     let listener = TcpListener::bind(address).unwrap();
     for stream in listener.incoming() {
         if let Ok(stream) = stream {
-            println!("INCOMING CONNECTION1");
-
             let acceptor = acceptor.clone();
             let path = path.clone();
             thread::spawn(move || {
-                println!("INCOMING CONNECTION");
                 let mut buf = [0; 2];
                 stream.peek(&mut buf).expect("peek failed");
 
@@ -203,7 +222,6 @@ pub fn run(address: &str, port: u32, path: &str) {
                 let is_https =
                     !((buf[0] as char).is_alphabetic() && (buf[1] as char).is_alphabetic());
 
-                println!("HTTPS: {:?}", is_https);
                 if is_https {
                     // acceptor.accept will block indefinitely if called with an HTTP stream.
                     if let Ok(stream) = acceptor.accept(stream) {

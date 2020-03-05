@@ -1,0 +1,14 @@
+<script>
+    // This code is inserted by devserver to enable reloading.
+    const socket = new WebSocket('ws://localhost:8129');
+
+    socket.addEventListener('open', function (event) {
+        console.log("Reloading enabled!");
+    });
+
+    // Listen for messages
+    socket.addEventListener('message', function (event) {
+        console.log('Message from server ', event.data);
+        location.reload();
+    });
+</script>

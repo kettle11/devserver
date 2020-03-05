@@ -21,6 +21,8 @@ use std::str;
 use std::sync::Arc;
 use std::thread;
 
+const RELOAD_PORT: u32 = 8129; /* Arbitrary port */
+
 fn read_header<T: Read + Write>(stream: &mut T) -> Vec<u8> {
     let mut buffer = Vec::new();
     let mut reader = std::io::BufReader::new(stream);
@@ -105,7 +107,6 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
     let buffer = read_header(&mut stream);
     let request_string = str::from_utf8(&buffer).unwrap();
 
-    // println!("REQUEST: {:?}", request_string);
     if request_string.len() == 0 {
         return;
     }
@@ -138,7 +139,14 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
     if let Ok(mut file_contents) = file_contents {
         // Pair the file extension to a mime type.
         let content_type = extension_to_mime_impl(Some(extension));
-        let content_length = file_contents.len();
+        let mut content_length = file_contents.len();
+
+        #[cfg(feature = "reload")]
+        let reload_append = include_str!("reload.html").as_bytes();
+        #[cfg(feature = "reload")]
+        {
+            content_length += reload_append.len();
+        }
 
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-type: {}\r\nContent-Length: {}\r\n\r\n",
@@ -148,6 +156,14 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
         bytes.append(&mut file_contents);
 
         stream.write_all(&bytes).unwrap();
+
+        #[cfg(feature = "reload")]
+        {
+            if extension == "html" {
+                // Insert javascript for reloading
+                stream.write_all(reload_append).unwrap();
+            }
+        }
         stream.flush().unwrap();
     } else {
         println!("Could not find file: {}", path.to_str().unwrap());
@@ -173,36 +189,61 @@ pub fn run(address: &str, port: u32, path: &str) {
     let reload = true;
     if reload {
         let address = address.to_owned();
-        //let path = path.clone();
+        let path = path.clone();
 
         thread::spawn(move || {
             // Setup websocket receiver.
-            let websocket_address = format!("{}:{:?}", address, 8129 /* Arbitrary port */);
+            let websocket_address = format!("{}:{:?}", address, RELOAD_PORT);
             let listener = TcpListener::bind(websocket_address).unwrap();
+
             for stream in listener.incoming() {
-                if let Ok(mut stream) = stream {
-                    handle_websocket_handshake(&mut stream);
-                    send_websocket_message(&mut stream, "Hello world!");
-                }
+                let path = path.clone();
+
+                thread::spawn(move || {
+                    if let Ok(mut stream) = stream {
+                        handle_websocket_handshake(&mut stream);
+
+                        // We do not handle ping/pong requests. Is that bad?
+                        // This code also assumes the client will never send any messages
+                        // other than the initial handshake.
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
+                        let mut watcher: RecommendedWatcher =
+                            Watcher::new(tx, std::time::Duration::from_millis(100)).unwrap();
+                        watcher
+                            .watch(Path::new(path.as_ref()), RecursiveMode::Recursive)
+                            .unwrap();
+                        loop {
+                            match rx.recv() {
+                                Ok(event) => {
+                                    let (path, refresh) = match event {
+                                        DebouncedEvent::NoticeWrite(path) => (path, false),
+                                        DebouncedEvent::NoticeRemove(path) => (path, false),
+                                        DebouncedEvent::Create(path) => (path, true),
+                                        DebouncedEvent::Write(path) => (path, true),
+                                        DebouncedEvent::Chmod(path) => (path, true),
+                                        DebouncedEvent::Remove(path) => (path, true),
+                                        DebouncedEvent::Rename(old_path, _new_path) => {
+                                            (old_path, false)
+                                        }
+                                        DebouncedEvent::Rescan => {
+                                            (std::path::PathBuf::new(), false)
+                                        }
+                                        DebouncedEvent::Error(..) => panic!(),
+                                    };
+
+                                    if refresh {
+                                        // Need to get relative path here.
+                                        send_websocket_message(&stream, path.to_str().unwrap());
+                                    }
+                                }
+                                Err(e) => println!("File watch error: {:?}", e),
+                            };
+                        }
+                    }
+                });
             }
         });
-        /*
-        let path = path.clone();
-        thread::spawn(move || {
-            let (tx, rx) = channel();
-            use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-            let mut watcher: RecommendedWatcher =
-                Watcher::new(tx, std::time::Duration::from_secs(2)).unwrap();
-            println!("PATH: {}", path);
-            watcher
-                .watch(Path::new(path.as_ref()), RecursiveMode::Recursive)
-                .unwrap();
-            match rx.recv() {
-                Ok(event) => println!("{:?}", event),
-                Err(e) => println!("watch error: {:?}", e),
-            };
-        });
-        */
     }
 
     let address = format!("{}:{:?}", address, port);

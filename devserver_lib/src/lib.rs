@@ -139,7 +139,9 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
         let reload_append = include_str!("reload.html").as_bytes();
         #[cfg(feature = "reload")]
         {
-            content_length += reload_append.len();
+            if extension == "html" {
+                content_length += reload_append.len();
+            }
         }
 
         let response = format!(

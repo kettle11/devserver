@@ -1,5 +1,5 @@
-# devserver
-[![Crates.io](https://img.shields.io/crates/v/devserver.svg)](https://crates.io/crates/devserver)
+# devserver [![Crates.io](https://img.shields.io/crates/v/devserver.svg)](https://crates.io/crates/devserver)
+
 
 An extremely tiny tool to serve a static folder locally.
 

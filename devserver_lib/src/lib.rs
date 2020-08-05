@@ -30,7 +30,7 @@ pub fn read_header<T: Read + Write>(stream: &mut T) -> Vec<u8> {
     buffer
 }
 
-fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
+fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool) {
     let buffer = read_header(&mut stream);
     let request_string = str::from_utf8(&buffer).unwrap();
 
@@ -44,13 +44,18 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
     let path = parts.next().unwrap().trim();
     let _http_version = parts.next().unwrap().trim();
 
-    let path = if path == "/" {
-        "index.html"
+    // Replace white space characters with proper whitespace.
+    let path = path.replace("%20", " ");
+    let path = if path.ends_with("/") {
+        Path::new(root_path).join(Path::new(&format!(
+            "{}{}",
+            path.trim_start_matches('/'),
+            "index.html"
+        )))
     } else {
-        path.trim_matches('/') // Trim off '/'
+        Path::new(root_path).join(path.trim_matches('/'))
     };
 
-    let path = Path::new(root_path).join(Path::new(path));
     let extension = path.extension().and_then(OsStr::to_str);
 
     // If no extension is specified assume html
@@ -73,7 +78,7 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
         let reload_append = include_bytes!("reload.html");
         #[cfg(feature = "reload")]
         {
-            if extension == "html" {
+            if extension == "html" && reload {
                 content_length += reload_append.len();
             }
         }
@@ -91,7 +96,7 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str) {
         // Inject code into HTML if reload is enabled
         #[cfg(feature = "reload")]
         {
-            if extension == "html" {
+            if extension == "html" && reload {
                 // Insert javascript for reloading
                 stream.write_all(reload_append).unwrap();
             }
@@ -147,10 +152,10 @@ pub fn run(address: &str, port: u32, path: &str, reload: bool) {
                 if is_https {
                     // acceptor.accept will block indefinitely if called with an HTTP stream.
                     if let Ok(stream) = acceptor.accept(stream) {
-                        handle_client(stream, &path);
+                        handle_client(stream, &path, reload);
                     }
                 } else {
-                    handle_client(stream, &path);
+                    handle_client(stream, &path, reload);
                 }
             });
         }

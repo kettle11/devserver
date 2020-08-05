@@ -8,7 +8,7 @@ fn main() {
     let mut address: String = "localhost:8080".to_string();
     let mut path: String = "".to_string();
     let mut args = args.iter();
-    let mut reload = false;
+    let mut reload = true;
     while let Some(arg) = args.next() {
         match arg.as_ref() {
             "--address" => {
@@ -17,7 +17,8 @@ fn main() {
                     .expect("Pass an address with a port after the '--address' flag")
                     .to_string()
             }
-            "--reload" => reload = true,
+            "--reload" | "--refresh" => reload = true,
+            "--noreload" | "--norefresh" => reload = false,
             "--path" => {
                 path = args
                     .next()
@@ -41,7 +42,14 @@ devserver --address 127.0.0.1:8080 --path "some_directory/subdirectory"
                 );
                 return;
             }
-            _ => {}
+            "devserver" => {}
+            _ => {
+                println!(
+                    "Unrecognized flag: `{:?}`.\nSee available options with `devserver --help`",
+                    arg
+                );
+                return;
+            }
         }
     }
     let hosted_path = env::current_dir().unwrap().join(Path::new(&path));
@@ -51,8 +59,21 @@ devserver --address 127.0.0.1:8080 --path "some_directory/subdirectory"
         return;
     }
 
+    let parts: Vec<&str> = address.split(':').collect();
+    let port = if let Some(port) = parts.get(1) {
+        let port = port.parse();
+        if let Ok(port) = port {
+            port
+        } else {
+            println!("Error: Port must be a number");
+            return;
+        }
+    } else {
+        8080
+    };
+
     println!(
-        "Serving [{}] at [https://{}] or [http://{}] ",
+        "\nServing [{}] at [ https://{} ] or [ http://{} ]",
         hosted_path.display(),
         address,
         address
@@ -62,12 +83,7 @@ devserver --address 127.0.0.1:8080 --path "some_directory/subdirectory"
         println!("Automatic reloading is enabled!");
     }
 
-    let parts: Vec<&str> = address.split(':').collect();
-    let port = if let Some(port) = parts.get(1) {
-        port.parse().expect("Port must be a number")
-    } else {
-        8080
-    };
+    println!("Stop with Ctrl+C");
 
     devserver_lib::run(&parts[0], port, &hosted_path.to_string_lossy(), reload);
 }

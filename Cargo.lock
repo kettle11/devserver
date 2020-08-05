@@ -78,14 +78,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "devserver"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
- "devserver_lib 0.1.3",
+ "devserver_lib 0.1.4",
 ]
 
 [[package]]
 name = "devserver_lib"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "base64 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "native-tls 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",

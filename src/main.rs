@@ -3,7 +3,7 @@ use std::env;
 use std::path::Path;
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let args: Vec<String> = env::args().skip(1).collect();
 
     let mut address: String = "localhost:8080".to_string();
     let mut path: String = "".to_string();
@@ -42,7 +42,6 @@ devserver --address 127.0.0.1:8080 --path "some_directory/subdirectory"
                 );
                 return;
             }
-            "devserver" => {}
             _ => {
                 println!(
                     "Unrecognized flag: `{:?}`.\nSee available options with `devserver --help`",

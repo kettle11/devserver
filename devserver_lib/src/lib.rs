@@ -413,6 +413,7 @@ fn extension_to_mime_impl(extension: Option<&str>) -> &'static str {
         Some("mid") => "audio/mid",
         Some("midi") => "audio/mid",
         Some("mix") => "application/octet-stream",
+        Some("mjs") => "application/javascript",
         Some("mk") => "text/plain; charset=utf8",
         Some("mmf") => "application/x-smaf",
         Some("mno") => "application/xml",

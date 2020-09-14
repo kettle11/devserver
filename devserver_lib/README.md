@@ -1,6 +1,12 @@
 # devserver_lib
 devserver_lib does (nearly) the minimum necessary to serve a static folder over https://localhost:8080.
 
+**DO NOT USE DEVSERVER_LIB IN PRODUCTION**
+
+`devserver_lib` should only be used for locally hosting files on a trusted network. 
+
+`devserver_lib` does not properly handle the attacks robust servers must withstand on an open network.
+
 ## usage
 ```rust
 extern crate devserver_lib;

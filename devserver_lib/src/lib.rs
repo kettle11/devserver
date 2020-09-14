@@ -44,8 +44,8 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool) 
     let path = parts.next().unwrap().trim();
     let _http_version = parts.next().unwrap().trim();
 
-    // Replace white space characters with proper whitespace.
-    let path = path.replace("%20", " ");
+    // Replace white space characters with proper whitespace and remove any paths that refer to the parent.
+    let path = path.replace("../", "").replace("%20", " ");
     let path = if path.ends_with("/") {
         Path::new(root_path).join(Path::new(&format!(
             "{}{}",
@@ -90,7 +90,6 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool) 
 
         let mut bytes = response.as_bytes().to_vec();
         bytes.append(&mut file_contents);
-
         stream.write_all(&bytes).unwrap();
 
         // Inject code into HTML if reload is enabled

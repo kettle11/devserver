@@ -37,24 +37,15 @@ fn parse_websocket_handshake(bytes: &[u8]) -> String {
 }
 
 // This function can send strings of text to a websocket stream.
-fn send_websocket_message<T: Write>(mut stream: T, message: &str) -> Result<(), std::io::Error> {
-    let message_bytes = message.as_bytes();
-    let payload_length = message_bytes.len();
+fn send_websocket_message<T: Write>(mut stream: T) -> Result<(), std::io::Error> {
+    let payload_length = 0;
 
     stream.write_all(&[129])?; // Devserver always sends text messages. The combination of bitflags and opcode produces '129'
     let mut second_byte: u8 = 0;
-    if payload_length < 125 {
-        second_byte |= payload_length as u8;
-        stream.write_all(&[second_byte])?;
-    } else if payload_length < std::u16::MAX as usize {
-        stream.write_all(&((126 + payload_length) as u16).to_be_bytes())?; // Write the length as a u16
-    } else if payload_length < std::u64::MAX as usize {
-        stream.write_all(&((127 + payload_length) as u16).to_be_bytes())?; // Write the length as a u64
-    } else {
-        println!("Message too large");
-    }
 
-    stream.write_all(&message_bytes)?;
+    second_byte |= payload_length as u8;
+    stream.write_all(&[second_byte])?;
+
     Ok(())
 }
 
@@ -66,6 +57,8 @@ fn handle_websocket_handshake<T: Read + Write>(mut stream: T) {
 }
 
 pub fn watch_for_reloads(address: &str, path: &str) {
+    use notify::{DebouncedEvent::*, RecommendedWatcher, RecursiveMode, Watcher};
+
     // Setup websocket receiver.
     let websocket_address = format!("{}:{:?}", address, RELOAD_PORT);
     let listener = TcpListener::bind(websocket_address).unwrap();
@@ -82,7 +75,6 @@ pub fn watch_for_reloads(address: &str, path: &str) {
                 // This code also assumes the client will never send any messages
                 // other than the initial handshake.
                 let (tx, rx) = std::sync::mpsc::channel();
-                use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
                 /* Is a 10ms delay here too short?*/
                 let mut watcher: RecommendedWatcher =
                     Watcher::new(tx, std::time::Duration::from_millis(10)).unwrap();
@@ -94,23 +86,20 @@ pub fn watch_for_reloads(address: &str, path: &str) {
                 loop {
                     match rx.recv() {
                         Ok(event) => {
-                            let (_path, refresh) = match event {
-                                DebouncedEvent::NoticeWrite(path) => (path, false),
-                                DebouncedEvent::NoticeRemove(path) => (path, false),
-                                DebouncedEvent::Create(path) => (path, true),
-                                DebouncedEvent::Write(path) => (path, true),
-                                DebouncedEvent::Chmod(path) => (path, true),
-                                DebouncedEvent::Remove(path) => (path, true),
-                                DebouncedEvent::Rename(old_path, _new_path) => (old_path, false),
-                                DebouncedEvent::Rescan => (std::path::PathBuf::new(), false),
-                                DebouncedEvent::Error(..) => panic!(),
+                            // Only refresh the web page for new and modified files
+                            // For now do not refresh for removed or renamed files, but in the future
+                            // it may be better to refresh then to immediately reflect path errors.
+                            let refresh = match event {
+                                NoticeWrite(..) | NoticeRemove(..) | Remove(..) | Rename(..)
+                                | Rescan => false,
+                                Create(..) | Write(..) | Chmod(..) => true,
+                                Error(..) => panic!(),
                             };
 
                             if refresh {
                                 // A blank message is sent triggering a refresh on any file change.
-                                // In the future a filepath be sent here.
                                 // If this message fails to send, then likely the socket has been closed.
-                                if send_websocket_message(&stream, "").is_err() {
+                                if send_websocket_message(&stream).is_err() {
                                     break;
                                 };
                             }

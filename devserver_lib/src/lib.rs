@@ -58,19 +58,24 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool) 
 
     let extension = path.extension().and_then(OsStr::to_str);
 
-    // If no extension is specified assume html
-    let path = if extension == None {
-        path.with_extension("html")
+    let (file_contents, extension) = if extension != None {
+        (fs::read(&path), extension)
     } else {
-        path.to_owned()
+        // If the request has no extension look first for a matching file without an extension
+        if let Ok(file_contents) = fs::read(&path) {
+            println!("WARNING: Serving file without extension: [ {} ] with media type 'application/octet-stream'", &path.to_str().unwrap());
+            (Ok(file_contents), None)
+        } else {
+            // If no file without an extension is found see if there's a file with a ".html" extension
+            // This enables "pretty URLs" without a trailing `/` like: `example.com/blog-post`
+            let file = fs::read(&path.with_extension("html"));
+            (file, Some("html"))
+        }
     };
-    let extension = extension.unwrap_or("html");
-
-    let file_contents = fs::read(&path);
 
     if let Ok(mut file_contents) = file_contents {
-        // Pair the file extension to a mime type.
-        let content_type = extension_to_mime_impl(Some(extension));
+        // Pair the file extension to a media (also known as MIME) type.
+        let content_type = extension_to_mime_impl(extension);
         let mut content_length = file_contents.len();
 
         // Prepare to inject code into HTML if reload is enabled.
@@ -78,7 +83,7 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool) 
         let reload_append = include_bytes!("reload.html");
         #[cfg(feature = "reload")]
         {
-            if extension == "html" && reload {
+            if extension == Some("html") && reload {
                 content_length += reload_append.len();
             }
         }
@@ -95,7 +100,7 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool) 
         // Inject code into HTML if reload is enabled
         #[cfg(feature = "reload")]
         {
-            if extension == "html" && reload {
+            if extension == Some("html") && reload {
                 // Insert javascript for reloading
                 stream.write_all(reload_append).unwrap();
             }

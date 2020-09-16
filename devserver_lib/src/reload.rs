@@ -36,15 +36,20 @@ fn parse_websocket_handshake(bytes: &[u8]) -> String {
     format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",bytes)
 }
 
-// This function can send strings of text to a websocket stream.
+// This sends a small message to the websocket stream
 fn send_websocket_message<T: Write>(mut stream: T) -> Result<(), std::io::Error> {
-    let payload_length = 0;
+    let message = "reload";
+    let message_bytes = message.as_bytes();
+    let payload_length = message_bytes.len();
+
+    // Note that the way this is hardcoded will not work for messages longer than 125 bytes
 
     stream.write_all(&[129])?; // Devserver always sends text messages. The combination of bitflags and opcode produces '129'
     let mut second_byte: u8 = 0;
-
     second_byte |= payload_length as u8;
     stream.write_all(&[second_byte])?;
+
+    stream.write_all(&message_bytes)?;
 
     Ok(())
 }

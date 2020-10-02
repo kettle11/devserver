@@ -52,12 +52,12 @@ fn main() {
 --reload                   Automatically refresh pages when a file in the hosted folder changes. Disabled by default.
 --address [address]:[port] Specify an address to use. The default is 'localhost:8080'.
 --path [path]              Specify the path of the folder to be hosted.
---header                   Specify an additional header to send in responses.
+--header                   Specify an additional header to send in responses. Use multiple --header flags for multiple headers.
 --help                     Display the helpful information you're reading right now.
 
 Examples:
 
-devserver --address 127.0.0.1:8080 --path "some_directory/subdirectory"
+devserver --address 127.0.0.1:8080 --path "some_directory/subdirectory" --header Access-Control-Allow-Origin='*'
 
                 "#
                 );

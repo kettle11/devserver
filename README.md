@@ -31,5 +31,7 @@ Visit http://localhost:8080 or https://localhost:8080 to see your hosted content
 
 `--path`    Changes the directory to be hosted.
 
+`--header`  Pass a header like "Access-Control-Allow-Origin='\*'". Use multiple `--header` flags for multiple headers.
+
 `--help`    Explains available options.
 

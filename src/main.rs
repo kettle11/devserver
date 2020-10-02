@@ -7,6 +7,7 @@ fn main() {
 
     let mut address: String = "localhost:8080".to_string();
     let mut path: String = "".to_string();
+    let mut headers = "".to_string();
     let mut args = args.iter();
     let mut reload = true;
     while let Some(arg) = args.next() {
@@ -25,6 +26,25 @@ fn main() {
                     .expect("Pass a path after the '--path' flag")
                     .to_string()
             }
+            "--header" => {
+                let mut new_header = args
+                    .next()
+                    .expect("Pass a header after the '--header' flag")
+                    .to_string();
+                if !new_header.contains(':') {
+                    if new_header.contains('=') {
+                        new_header = new_header.replacen("=", ":", 1);
+                    } else {
+                        panic!("Pass a ':' or '=' in the '--header' flag");
+                    }
+                }
+                if new_header.contains('\r') || new_header.contains('\n') || !new_header.is_ascii()
+                {
+                    panic!("Only ASCII without line breaks is allowed in the '--header' flag");
+                }
+                headers.push_str("\r\n");
+                headers.push_str(&new_header);
+            }
             "--help" => {
                 println!(
                     r#"Run 'devserver' in a folder to host that folder.
@@ -32,11 +52,12 @@ fn main() {
 --reload                   Automatically refresh pages when a file in the hosted folder changes. Disabled by default.
 --address [address]:[port] Specify an address to use. The default is 'localhost:8080'.
 --path [path]              Specify the path of the folder to be hosted.
+--header                   Specify an additional header to send in responses. Use multiple --header flags for multiple headers.
 --help                     Display the helpful information you're reading right now.
 
 Examples:
 
-devserver --address 127.0.0.1:8080 --path "some_directory/subdirectory"
+devserver --address 127.0.0.1:8080 --path "some_directory/subdirectory" --header Access-Control-Allow-Origin='*'
 
                 "#
                 );
@@ -84,5 +105,11 @@ devserver --address 127.0.0.1:8080 --path "some_directory/subdirectory"
 
     println!("Stop with Ctrl+C");
 
-    devserver_lib::run(&parts[0], port, &hosted_path.to_string_lossy(), reload);
+    devserver_lib::run(
+        &parts[0],
+        port,
+        &hosted_path.to_string_lossy(),
+        reload,
+        &headers,
+    );
 }

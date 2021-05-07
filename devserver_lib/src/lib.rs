@@ -117,7 +117,7 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool, 
 
 pub fn run(address: &str, port: u32, path: &str, reload: bool, headers: &str) {
     // Hard coded certificate generated with the following commands:
-    // openssl req -x509 -newkey rsa:1024 -keyout key.pem -out cert.pem -days 36500 -nodes -subj "/"
+    // openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 36500 -nodes -subj "/"
     // openssl pkcs12 -export -out identity.pfx -inkey key.pem -in cert.pem
     // password for second command: 'debug'
     let bytes = include_bytes!("identity.pfx");

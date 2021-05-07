@@ -1,9 +1,9 @@
 [package]
 name = "devserver_lib"
-version = "0.1.7"
+version = "0.3.0"
 authors = ["Ian Kettlewell <ian.kettlewell@gmail.com>"]
 edition = "2018"
-license = "zlib"
+license = "Zlib"
 description = "A zero configuration library for hosting a local folder via https. Refer to 'devserver' for the command line tool."
 repository = "https://github.com/kettle11/devserver/tree/master/devserver_lib"
 readme = "README.md"

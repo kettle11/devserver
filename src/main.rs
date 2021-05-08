@@ -49,7 +49,8 @@ fn main() {
                 println!(
                     r#"Run 'devserver' in a folder to host that folder.
 
---reload                   Automatically refresh pages when a file in the hosted folder changes. Disabled by default.
+--reload                   Automatically refresh pages when a file in the hosted folder changes. Enabled by default.
+--noreload                 Do not automatically refresh pages when a file in the hosted folder changes.
 --address [address]:[port] Specify an address to use. The default is 'localhost:8080'.
 --path [path]              Specify the path of the folder to be hosted.
 --header                   Specify an additional header to send in responses. Use multiple --header flags for multiple headers.

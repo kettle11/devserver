@@ -6,8 +6,7 @@ use native_tls::{Identity, TlsAcceptor};
 
 use std::ffi::OsStr;
 use std::fs;
-use std::io::BufRead;
-use std::io::{Read, Write};
+use std::io::{BufRead, Error, ErrorKind, Read, Result, Write};
 use std::net::TcpListener;
 use std::path::Path;
 use std::str;
@@ -16,6 +15,26 @@ use std::thread;
 
 #[cfg(feature = "reload")]
 mod reload;
+
+struct FileProxy {
+    path: String,
+    extension: Option<String>,
+}
+impl FileProxy {
+    fn new(path: String, extension: Option<String>) -> Self {
+        FileProxy { path, extension }
+    }
+    fn blank() -> Self {
+        FileProxy {
+            path: String::new(),
+            extension: None,
+        }
+    }
+    fn read(&self, root_path: &str) -> Result<Vec<u8>> {
+        let full_path = Path::new(root_path).join(&self.path);
+        fs::read(full_path)
+    }
+}
 
 pub fn read_header<T: Read + Write>(stream: &mut T) -> Vec<u8> {
     let mut buffer = Vec::new();
@@ -44,38 +63,24 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool, 
     let path = parts.next().unwrap().trim();
     let _http_version = parts.next().unwrap().trim();
 
-    // Replace white space characters with proper whitespace and remove any paths that refer to the parent.
-    let path = path.replace("../", "").replace("%20", " ");
-    let path = if path.ends_with("/") {
-        Path::new(root_path).join(Path::new(&format!(
-            "{}{}",
-            path.trim_start_matches('/'),
-            "index.html"
-        )))
-    } else {
-        Path::new(root_path).join(path.trim_matches('/'))
-    };
-
-    let extension = path.extension().and_then(OsStr::to_str);
-
-    let (file_contents, extension) = if extension != None {
-        (fs::read(&path), extension)
-    } else {
-        // If the request has no extension look first for a matching file without an extension
-        if let Ok(file_contents) = fs::read(&path) {
-            println!("WARNING: Serving file without extension: [ {} ] with media type 'application/octet-stream'", &path.to_str().unwrap());
-            (Ok(file_contents), None)
-        } else {
-            // If no file without an extension is found see if there's a file with a ".html" extension
-            // This enables "pretty URLs" without a trailing `/` like: `example.com/blog-post`
-            let file = fs::read(&path.with_extension("html"));
-            (file, Some("html"))
-        }
-    };
+    let mut file_contents = Err(Error::new(ErrorKind::NotFound, "No matching file found"));
+    let candidates = file_candidates(path);
+    let blank = FileProxy::blank();
+    let chosen = candidates
+        .iter()
+        .find(|candidate| {
+            if let Ok(new_file_contents) = candidate.read(root_path) {
+                file_contents = Ok(new_file_contents);
+                true
+            } else {
+                false
+            }
+        })
+        .unwrap_or(&blank);
 
     if let Ok(mut file_contents) = file_contents {
         // Pair the file extension to a media (also known as MIME) type.
-        let content_type = extension_to_mime_impl(extension);
+        let content_type = extension_to_mime_impl(chosen.extension.as_deref());
         let mut content_length = file_contents.len();
 
         // Prepare to inject code into HTML if reload is enabled.
@@ -83,7 +88,7 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool, 
         let reload_append = include_bytes!("reload.html");
         #[cfg(feature = "reload")]
         {
-            if extension == Some("html") && reload {
+            if content_type == "text/html" && reload {
                 content_length += reload_append.len();
             }
         }
@@ -100,7 +105,7 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool, 
         // Inject code into HTML if reload is enabled
         #[cfg(feature = "reload")]
         {
-            if extension == Some("html") && reload {
+            if content_type == "text/html" && reload {
                 // Insert javascript for reloading
                 stream.write_all(reload_append).unwrap();
             }
@@ -108,7 +113,7 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool, 
 
         stream.flush().unwrap();
     } else {
-        println!("Could not find file: {}", path.to_str().unwrap());
+        println!("Could not find file: {}", chosen.path);
         let response = "HTTP/1.1 404 NOT FOUND\r\n\r\n";
         stream.write_all(response.as_bytes()).unwrap();
         stream.flush().unwrap();
@@ -165,6 +170,51 @@ pub fn run(address: &str, port: u32, path: &str, reload: bool, headers: &str) {
             });
         }
     }
+}
+
+fn file_candidates(path: &str) -> Vec<FileProxy> {
+    let mut options: Vec<FileProxy> = Vec::new();
+
+    let path = path.trim_start_matches("/").replace("../", "").replace("%20", " ");
+    let mut parts = path.split("?");
+
+    let path = Path::new(parts.next().unwrap_or(""));
+    let query = parts.next();
+    let base_path = path.with_extension("");
+    let base = base_path.to_str().unwrap_or("");
+    let ext = path.extension().and_then(OsStr::to_str);
+
+    if let Some(query) = query {
+        if let Some(ext) = ext {
+            options.push(FileProxy::new(
+                format!("{}.{}?{}", base, ext, query),
+                Some(ext.to_owned()),
+            ));
+        }
+        options.push(FileProxy::new(format!("{}?{}", base, query), None));
+    }
+    if let Some(ext) = ext {
+        options.push(FileProxy::new(
+            format!("{}.{}", base, ext),
+            Some(ext.to_owned()),
+        ));
+    }
+    options.push(FileProxy::new(base.to_owned(), None));
+    options.push(FileProxy::new(
+        format!("{}.html", base),
+        Some(String::from("html")),
+    ));
+    // TODO we should handle windows by using PathBuf::join and not hardcode /
+    options.push(FileProxy::new(
+        format!("{}/index.html", base),
+        Some(String::from("html")),
+    ));
+    options.push(FileProxy::new(
+        String::from("index.html"),
+        Some(String::from("html")),
+    ));
+
+    options
 }
 
 /// Taken from Rouille:

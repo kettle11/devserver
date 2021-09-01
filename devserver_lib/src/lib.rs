@@ -37,12 +37,18 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool, 
     if request_string.is_empty() {
         return;
     }
+
     // Split the request into different parts.
     let mut parts = request_string.split(' ');
 
     let _method = parts.next().unwrap().trim();
-    let path = parts.next().unwrap().trim();
+    let mut path = parts.next().unwrap().trim();
     let _http_version = parts.next().unwrap().trim();
+
+    // Trim parameters from URL
+    if let Some(parameters_index) = path.find('?') {
+        path = &path[..parameters_index];
+    }
 
     // Replace white space characters with proper whitespace and remove any paths that refer to the parent.
     let path = path.replace("../", "").replace("%20", " ");

@@ -14,11 +14,12 @@ categories = ["web-programming::http-server"]
 name = "devserver_lib"
 
 [dependencies]
-native-tls = "0.2"
+native-tls = {version = "0.2", optional = true}
 notify = {version = "4.0.15", optional = true}
 sha-1 = {version = "0.8.2", optional = true}
 base64 = {version = "0.11.0", optional = true}
 
 [features]
-default = []
+default = ["https"]
+https = ["native-tls"]
 reload = ["notify", "sha-1", "base64"]

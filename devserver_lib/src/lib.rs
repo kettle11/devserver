@@ -31,6 +31,7 @@ pub fn read_header<T: Read + Write>(stream: &mut T) -> Vec<u8> {
     buffer
 }
 
+#[allow(unused)]
 fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool, headers: &str) {
     let buffer = read_header(&mut stream);
     let request_string = str::from_utf8(&buffer).unwrap();
@@ -83,6 +84,8 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool, 
     if let Ok(mut file_contents) = file_contents {
         // Pair the file extension to a media (also known as MIME) type.
         let content_type = extension_to_mime_impl(extension);
+
+        #[allow(unused_mut)]
         let mut content_length = file_contents.len();
 
         // Prepare to inject code into HTML if reload is enabled.

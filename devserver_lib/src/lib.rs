@@ -24,7 +24,7 @@ pub fn read_header<T: Read + Write>(stream: &mut T) -> Vec<u8> {
     loop {
         reader.read_until(b'\n', &mut buffer).unwrap();
         // Read until end of header.
-        if &buffer[buffer.len() - 4..] == b"\r\n\r\n" {
+        if buffer.len() >= 4 && &buffer[buffer.len() - 4..] == b"\r\n\r\n" {
             break;
         }
     }

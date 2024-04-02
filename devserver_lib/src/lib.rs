@@ -54,7 +54,7 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool, 
 
     // Replace white space characters with proper whitespace and remove any paths that refer to the parent.
     let path = path.replace("../", "").replace("%20", " ");
-    let path = if path.ends_with("/") {
+    let path = if path.ends_with('/') {
         Path::new(root_path).join(Path::new(&format!(
             "{}{}",
             path.trim_start_matches('/'),
@@ -66,7 +66,7 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool, 
 
     let extension = path.extension().and_then(OsStr::to_str);
 
-    let (file_contents, extension) = if extension != None {
+    let (file_contents, extension) = if extension.is_some() {
         (fs::read(&path), extension)
     } else {
         // If the request has no extension look first for a matching file without an extension
@@ -76,7 +76,7 @@ fn handle_client<T: Read + Write>(mut stream: T, root_path: &str, reload: bool, 
         } else {
             // If no file without an extension is found see if there's a file with a ".html" extension
             // This enables "pretty URLs" without a trailing `/` like: `example.com/blog-post`
-            let file = fs::read(&path.with_extension("html"));
+            let file = fs::read(path.with_extension("html"));
             (file, Some("html"))
         }
     };
@@ -150,38 +150,35 @@ pub fn run(address: &str, port: u32, path: &str, reload: bool, headers: &str) {
 
     let address_with_port = format!("{}:{:?}", address, port);
     let listener = TcpListener::bind(address_with_port).unwrap();
-    for stream in listener.incoming() {
-        if let Ok(stream) = stream {
+    for stream in listener.incoming().flatten() {
+        #[cfg(feature = "https")]
+        let acceptor = acceptor.clone();
+
+        let path = path.to_owned();
+        let headers = headers.to_owned();
+        thread::spawn(move || {
+            // HTTP requests always begin with a verb like 'GET'.
+            // HTTPS requests begin with a number, so peeking and checking for a number
+            // is used to determine if a request is HTTPS or HTTP
+            let mut buf = [0; 2];
+            stream.peek(&mut buf).expect("peek failed");
+
             #[cfg(feature = "https")]
-            let acceptor = acceptor.clone();
+            let is_https = !((buf[0] as char).is_alphabetic() && (buf[1] as char).is_alphabetic());
 
-            let path = path.to_owned();
-            let headers = headers.to_owned();
-            thread::spawn(move || {
-                // HTTP requests always begin with a verb like 'GET'.
-                // HTTPS requests begin with a number, so peeking and checking for a number
-                // is used to determine if a request is HTTPS or HTTP
-                let mut buf = [0; 2];
-                stream.peek(&mut buf).expect("peek failed");
+            #[cfg(not(feature = "https"))]
+            let is_https = false;
 
+            if is_https {
+                // acceptor.accept will block indefinitely if called with an HTTP stream.
                 #[cfg(feature = "https")]
-                let is_https =
-                    !((buf[0] as char).is_alphabetic() && (buf[1] as char).is_alphabetic());
-
-                #[cfg(not(feature = "https"))]
-                let is_https = false;
-
-                if is_https {
-                    // acceptor.accept will block indefinitely if called with an HTTP stream.
-                    #[cfg(feature = "https")]
-                    if let Ok(stream) = acceptor.accept(stream) {
-                        handle_client(stream, &path, reload, &headers);
-                    }
-                } else {
+                if let Ok(stream) = acceptor.accept(stream) {
                     handle_client(stream, &path, reload, &headers);
                 }
-            });
-        }
+            } else {
+                handle_client(stream, &path, reload, &headers);
+            }
+        });
     }
 }
 

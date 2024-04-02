@@ -1,0 +1,32 @@
+---
+name: Build
+
+# yamllint disable-line rule:truthy
+on: [push, pull_request]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check formatting (program)
+        run: cargo fmt --check
+
+      - name: Clippy (program)
+        run: cargo clippy -- -D warnings
+
+      - name: Check formatting (library)
+        run: cd devserver_lib && cargo fmt --check
+
+      - name: Clippy (library)
+        run: cd devserver_lib && cargo clippy -- -D warnings

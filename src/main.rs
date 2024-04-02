@@ -33,7 +33,7 @@ fn main() {
                     .to_string();
                 if !new_header.contains(':') {
                     if new_header.contains('=') {
-                        new_header = new_header.replacen("=", ":", 1);
+                        new_header = new_header.replacen('=', ":", 1);
                     } else {
                         panic!("Pass a ':' or '=' in the '--header' flag");
                     }
@@ -107,7 +107,7 @@ devserver --address 127.0.0.1:8080 --path "some_directory/subdirectory" --header
     println!("Stop with Ctrl+C");
 
     devserver_lib::run(
-        &parts[0],
+        parts[0],
         port,
         &hosted_path.to_string_lossy(),
         reload,
